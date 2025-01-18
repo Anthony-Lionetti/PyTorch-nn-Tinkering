@@ -1,10 +1,28 @@
+## Attention Head
+
+### Layers
+
+-
+
+## Positional Embeddings vs. Rotary Embeddings
+
 ## RMSNorm vs LayerNorm
+
+### LayerNorm
+
+_Variables_
+
+- $\gamma$:
+- $\beta$:
+- $\epsilon$:
+- n: The number of features in the layer
+- x: The input vector
 
 ### RMSNorm
 
 _Variables_
 
-- y (gamma): A learnable scale parameter
+- $\gamma$: A learnable scale parameter
 - $\epsilon$: A small constant (used for stability)
 - n: The number of features in the layer
 - x: The input vector
@@ -35,4 +53,4 @@ So let's run through RMS without epsilon using [0.000001, 0.000000, 0.000002].
   - This is
 
 - Epsilon essentially sets a minimum for how small the denomenator can get.
-- This protects from overflow
+- This protects from overflow since the minimum for rsqrt = 1 / sqrt($\epsilon$)
