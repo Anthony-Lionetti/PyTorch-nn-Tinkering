@@ -54,3 +54,19 @@ So let's run through RMS without epsilon using [0.000001, 0.000000, 0.000002].
 
 - Epsilon essentially sets a minimum for how small the denomenator can get.
 - This protects from overflow since the minimum for rsqrt = 1 / sqrt($\epsilon$)
+
+#### Absolute & Relative Position
+
+**Absolute Position**
+
+- This is where the token of interest currently IS in the sequence of tokens
+- i.e.: token_1, token_2, token_3, token_4, ..., token_N.
+  - The \_N suffix if the absolute position of the token of interest
+
+**Relaive Position**
+
+- This is how far the token of interest is from another token in the Sequence.
+- i.e.: token_1, token_2, token_3, token_4, ..., token_N.
+  - The \_N_i token minus the \_N_j token is the relative position of token _i_ to token _j_
+
+Both of these positions arrise from the rotation applied to the specific token.

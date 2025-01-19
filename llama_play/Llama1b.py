@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
-from typing import Tuple, Optional
 from configs import LlamaConfig, llama_3_2_1b
+import math
 
 # View the configs.py file to understand this configuration abstraction
 # essentially, this is where all of the parameters for initializing
@@ -79,14 +79,69 @@ class LlamaRMSNorm(nn.Module):
 ######################
 ## Rotary Embedding ##
 ######################
+class LlamaRotaryEmbedding(nn.Module):
+    def __init__(self, config:LlamaConfig):
+        super().__init__()
+        self.config = config        
 
-def rotate_half(x):
+        # Create inverse frequency bands
+        inv_freq = self._rope_init_fn(config=config)
+        self.inv_freq = inv_freq
+        self.register_buffer("inv_freq", inv_freq, persistent=False)
+        
+
+    def _rope_init_fn(self, config: LlamaConfig):
+        inv_freq = 1.0 / (config.rope_theta ** (torch.arange(0, config.head_dim, 2).float() / config.head_dim))
+
+        factor = config.rope_scaling["factor"]  # `8` in the original implementation
+        low_freq_factor = config.rope_scaling["low_freq_factor"]  # `1` in the original implementation
+        high_freq_factor = config.rope_scaling["high_freq_factor"]  # `4` in the original implementation
+        old_context_len = config.rope_scaling["original_max_position_embeddings"]  # `8192` in the original implementation
+       
+        low_freq_wavelen = old_context_len / low_freq_factor
+        high_freq_wavelen = old_context_len / high_freq_factor
+
+        wavelen = 2 * math.pi / inv_freq
+        # wavelen < high_freq_wavelen: do nothing
+        # wavelen > low_freq_wavelen: divide by factor
+        inv_freq_llama = torch.where(wavelen > low_freq_wavelen, inv_freq / factor, inv_freq)
+        # otherwise: interpolate between the two, using a smooth factor
+        smooth_factor = (old_context_len / wavelen - low_freq_factor) / (high_freq_factor - low_freq_factor)
+        smoothed_inv_freq = (1 - smooth_factor) * inv_freq_llama / factor + smooth_factor * inv_freq_llama
+        is_medium_freq = ~(wavelen < high_freq_wavelen) * ~(wavelen > low_freq_wavelen)
+        inv_freq_llama = torch.where(is_medium_freq, smoothed_inv_freq, inv_freq_llama)
+
+        return inv_freq_llama
+
+        
+    @torch.no_grad()
+    def forward(self, x:torch.Tensor, position_ids:torch.Tensor):
+        # Core RoPE block
+        inv_freq_expanded = self.inv_freq[None, :, None].float().expand(position_ids.shape[0], -1, 1)
+        position_ids_expanded = position_ids[:, None, :].float()
+        # Force float32
+        device_type = x.device.type
+        device_type = device_type if isinstance(device_type, str) and device_type != "mps" else "cpu"
+        with torch.autocast(device_type=device_type, enabled=False):
+            freqs = (inv_freq_expanded.float() @ position_ids_expanded.float()).transpose(1, 2)
+            emb = torch.cat((freqs, freqs), dim=-1)
+            cos = emb.cos()
+            sin = emb.sin()
+
+        return cos.to(dtype=x.dtype), sin.to(dtype=x.dtype)
+
+
+#####################
+## Llama Attention ##
+#####################
+
+def rotate_half(x:torch.Tensor) -> torch.Tensor:
     """Rotates half the hidden dims of the input."""
     x1 = x[..., : x.shape[-1] // 2]
     x2 = x[..., x.shape[-1] // 2 :]
     return torch.cat((-x2, x1), dim=-1)
 
-def apply_rotary_pos_emb(q, k, cos, sin, unsqueeze_dim=1):
+def apply_rotary_pos_emb(q:torch.Tensor, k:torch.Tensor, cos:torch.Tensor, sin:torch.Tensor, unsqueeze_dim=1):
     """Applies Rotary Position Embedding to the query and key tensors."""
     cos = cos.unsqueeze(unsqueeze_dim)
     sin = sin.unsqueeze(unsqueeze_dim)
@@ -94,46 +149,3 @@ def apply_rotary_pos_emb(q, k, cos, sin, unsqueeze_dim=1):
     k_embed = (k * cos) + (rotate_half(k) * sin)
     return q_embed, k_embed
 
-
-class LlamaRotaryEmbedding(nn.Module):
-    def __init__(self, config:LlamaConfig):
-        super().__init__()
-
-        # BC: "rope_type" was originally "type"
-        self.max_seq_len_cached = config.max_position_embeddings
-        self.original_max_seq_len = config.max_position_embeddings
-
-        self.config = config
-        self.rope_init_fn = ROPE_INIT_FUNCTIONS[self.rope_type]
-
-        inv_freq, self.attention_scaling = self.rope_init_fn(self.config, device)
-        self.register_buffer("inv_freq", inv_freq, persistent=False)
-        self.original_inv_freq = self.inv_freq
-        
-        # Create inverse frequency bands
-        inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2).float() / dim))
-        self.register_buffer("inv_freq", inv_freq)
-        
-        self.max_seq_len = max_position_embeddings
-        self.dim = dim
-        
-    @torch.no_grad()
-    def forward(self, x: torch.Tensor, position_ids: torch.Tensor):
-        """
-        Args:
-            x: Input tensor of shape (batch_size, seq_len, dim)
-            position_ids: Tensor of shape (batch_size, seq_len) containing position indices
-        """
-        # Create frequency matrix
-        inv_freq_expanded = self.inv_freq[None, :, None].expand(position_ids.shape[0], -1, 1)
-        position_ids_expanded = position_ids[:, None, :].float()
-        
-        # Compute frequencies for each position
-        freqs = (inv_freq_expanded @ position_ids_expanded).transpose(1, 2)
-        
-        # Create rotation matrix components
-        emb = torch.cat((freqs, freqs), dim=-1)
-        cos = emb.cos()
-        sin = emb.sin()
-        
-        return cos.to(dtype=x.dtype), sin.to(dtype=x.dtype)
