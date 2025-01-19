@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from typing_extensions import Tuple
 from configs import LlamaConfig, llama_3_2_1b
 import math
 
@@ -149,3 +150,37 @@ def apply_rotary_pos_emb(q:torch.Tensor, k:torch.Tensor, cos:torch.Tensor, sin:t
     k_embed = (k * cos) + (rotate_half(k) * sin)
     return q_embed, k_embed
 
+class LlamaAttention(nn.Module):
+    """Multi-headed Attention"""
+
+    def __init__(self, config:LlamaConfig, layer_idx:int):
+        super().__init__()
+        self.config = config
+        self.layer_idx = layer_idx
+        self.head_dim = config.head_dim
+        self.num_kv_groups = config.num_attention_heads // config.num_key_value_heads
+        self.scaling = self.head_dim**-0.5
+        self.attention_dropout = config.attention_dropout
+        self.is_causal = True
+
+        ## Query Projection: transforms input embeddings into query vectors (What "I am" interested in)
+        self.q_proj = nn.Linear(config.hidden_size, config.num_attention_heads * self.head_dim, bias=config.attention_bias)
+        ## Key Projection: transforms input embeddings into key vectors (Here is what "I" have)
+        self.k_proj = nn.Linear(config.hidden_size, config.num_key_value_heads * self.head_dim, bias=config.attention_bias)
+        ## Value Projection: transforms input embeddings into value vectors (If you "find me interesting" here is what I communicate)
+        self.v_proj = nn.Linear(config.hidden_size, config.num_key_value_heads * self.head_dim, bias=config.attention_bias)
+
+        ## Output Projection: concatenates the outputs from all attention heads, projecting them back to the original head size
+        self.o_proj = nn.Linear(config.num_attention_heads * self.head_dim, config.hidden_size, bias=config.attention_bias)
+
+    
+    def forward(self, hidden_states:torch.Tensor, position_embeddings:Tuple[torch.Tensor, torch.Tensor]):
+        input_shape = hidden_states.shape[:-1]
+        hidden_shape = (*input_shape, -1, self.head_dim)
+
+        query_states = self.q_proj(hidden_states).view(hidden_shape).transpose(1, 2)
+        key_states = self.k_proj(hidden_states).view(hidden_shape).transpose(1, 2)
+        value_states = self.v_proj(hidden_states).view(hidden_shape).transpose(1, 2)
+
+        cos, sin = position_embeddings
+        query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)

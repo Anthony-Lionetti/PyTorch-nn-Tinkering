@@ -1,8 +1,12 @@
 ## Attention Head
 
-### Layers
+### Types of Attention
 
--
+**Scaled Dot Product Attention (SDPA)**:
+
+- Original attention mechanism from the 'Attention is all you need" paper
+- Computes and stores the full attention matrix
+  - $\omega(N^2)$ memory complexity where N is the sequence length
 
 ## Positional Embeddings vs. Rotary Embeddings
 
@@ -67,6 +71,6 @@ So let's run through RMS without epsilon using [0.000001, 0.000000, 0.000002].
 
 - This is how far the token of interest is from another token in the Sequence.
 - i.e.: token_1, token_2, token_3, token_4, ..., token_N.
-  - The \_N_i token minus the \_N_j token is the relative position of token _i_ to token _j_
+  - The \_N*i token minus the \_N_j token is the relative position of token \_i* to token _j_
 
 Both of these positions arrise from the rotation applied to the specific token.
