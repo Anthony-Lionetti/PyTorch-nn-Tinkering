@@ -6,7 +6,23 @@
 
 - Original attention mechanism from the 'Attention is all you need" paper
 - Computes and stores the full attention matrix
-  - $\omega(N^2)$ memory complexity where N is the sequence length
+  - $O(N^2)$ memory complexity where N is the sequence length
+
+**Flash Attention**:
+
+- Optimizes memory usage through block-wise computation
+
+  - Instead of storing attention, it recomputes attention during the backward pass.
+  - Using tiling (what is tiling) keeps computations in the GPU's memory (SRAM)
+  - $O(N)$ memory complexity
+
+- The main tradeoff is that it is decreasing memory, by increasing computation
+
+**Flex Attention**:
+
+- A hybrid attention approach between SDPA and Flash attention.
+- Allows for dynamic switching between different attention implementations.
+- Often used for models handling varying seq lengths since it can fall back on SDPA for shorter sequences and use Flash Attention for longer ones
 
 ## Positional Embeddings vs. Rotary Embeddings
 
